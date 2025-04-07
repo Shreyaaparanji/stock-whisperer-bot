@@ -4,20 +4,38 @@ import StockSearch from '@/components/StockSearch';
 import StockChart from '@/components/StockChart';
 import ChatInterface from '@/components/ChatInterface';
 import PredictionCard from '@/components/PredictionCard';
-import { getStockBySymbol, type StockData } from '@/utils/stockData';
-import { ChartBar, Sparkles } from 'lucide-react';
+import SentimentAnalysis from '@/components/SentimentAnalysis';
+import { getStockBySymbol, getStocksByMarket, type StockData } from '@/utils/stockData';
+import { ChartBar, Sparkles, BarChart2, Globe } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const Index = () => {
   const [selectedStock, setSelectedStock] = useState<StockData | undefined>();
+  const [selectedMarket, setSelectedMarket] = useState<'US' | 'India'>('US');
 
   const handleSelectStock = (stock: StockData) => {
     setSelectedStock(stock);
+    setSelectedMarket(stock.market);
   };
 
   const handleStockMentioned = (symbol: string) => {
     const stock = getStockBySymbol(symbol);
     if (stock) {
       setSelectedStock(stock);
+      setSelectedMarket(stock.market);
+    }
+  };
+  
+  const handleMarketSelect = (market: 'US' | 'India') => {
+    setSelectedMarket(market);
+    
+    // If no stock is selected or the current stock is not from the selected market,
+    // select the first stock from the newly selected market
+    if (!selectedStock || selectedStock.market !== market) {
+      const marketStocks = getStocksByMarket(market);
+      if (marketStocks.length > 0) {
+        setSelectedStock(marketStocks[0]);
+      }
     }
   };
 
@@ -33,15 +51,45 @@ const Index = () => {
             </div>
             <div className="hidden md:flex items-center gap-4">
               <div className="flex items-center gap-1">
-                <ChartBar className="h-4 w-4" />
-                <span className="text-sm">AI-Powered Stock Predictions</span>
+                <BarChart2 className="h-4 w-4" />
+                <span className="text-sm">AI-Powered Stock Predictions + Sentiment Analysis</span>
               </div>
+              <Tabs defaultValue={selectedMarket} onValueChange={(v) => handleMarketSelect(v as 'US' | 'India')}>
+                <TabsList className="h-8 bg-blue-800">
+                  <TabsTrigger 
+                    value="US" 
+                    className="data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+                  >
+                    <span className="flex items-center gap-1">
+                      <Globe className="h-3 w-3" /> US Market
+                    </span>
+                  </TabsTrigger>
+                  <TabsTrigger 
+                    value="India" 
+                    className="data-[state=active]:bg-blue-600 data-[state=active]:text-white"
+                  >
+                    <span className="flex items-center gap-1">
+                      <Globe className="h-3 w-3" /> Indian Market
+                    </span>
+                  </TabsTrigger>
+                </TabsList>
+              </Tabs>
             </div>
           </div>
         </div>
       </header>
 
       <main className="container max-w-7xl mx-auto px-4 py-8">
+        {/* Market Selection for Mobile */}
+        <div className="md:hidden mb-4">
+          <Tabs defaultValue={selectedMarket} onValueChange={(v) => handleMarketSelect(v as 'US' | 'India')}>
+            <TabsList className="w-full">
+              <TabsTrigger value="US" className="flex-1">US Market</TabsTrigger>
+              <TabsTrigger value="India" className="flex-1">Indian Market</TabsTrigger>
+            </TabsList>
+          </Tabs>
+        </div>
+
         {/* Search Bar */}
         <div className="mb-8 flex justify-center">
           <StockSearch onSelectStock={handleSelectStock} />
@@ -56,7 +104,10 @@ const Index = () => {
               <div className="md:col-span-1">
                 <PredictionCard stock={selectedStock} />
               </div>
-              <div className="md:col-span-2 bg-white rounded-lg shadow p-4">
+              <div className="md:col-span-1">
+                <SentimentAnalysis stock={selectedStock} />
+              </div>
+              <div className="md:col-span-1 bg-white rounded-lg shadow p-4">
                 <h3 className="font-medium mb-2">Investment Insights</h3>
                 <p className="text-sm text-gray-600 mb-3">
                   {selectedStock 
@@ -92,12 +143,20 @@ const Index = () => {
                       </span>
                     </div>
                     <div className="text-xs bg-gray-50 p-2 rounded">
-                      <span className="block text-gray-500 mb-1">Time Horizon</span>
-                      <span className="font-medium">{selectedStock.prediction.timeFrame}</span>
+                      <span className="block text-gray-500 mb-1">News Sentiment</span>
+                      <span className={`font-medium ${
+                        selectedStock.sentiment.score >= 0.6 ? 'text-stock-green' : 
+                        selectedStock.sentiment.score >= 0.4 ? 'text-amber-500' : 
+                        'text-stock-red'
+                      }`}>
+                        {selectedStock.sentiment.score >= 0.6 ? 'Positive' : 
+                         selectedStock.sentiment.score >= 0.4 ? 'Neutral' : 
+                         'Negative'}
+                      </span>
                     </div>
                     <div className="text-xs bg-gray-50 p-2 rounded">
-                      <span className="block text-gray-500 mb-1">Model Confidence</span>
-                      <span className="font-medium">{(selectedStock.prediction.confidence * 100).toFixed(0)}%</span>
+                      <span className="block text-gray-500 mb-1">Market</span>
+                      <span className="font-medium">{selectedStock.market}</span>
                     </div>
                   </div>
                 )}
@@ -107,7 +166,10 @@ const Index = () => {
 
           {/* Chat Interface */}
           <div className="xl:col-span-1 h-[700px]">
-            <ChatInterface onStockMentioned={handleStockMentioned} />
+            <ChatInterface 
+              onStockMentioned={handleStockMentioned} 
+              onMarketSelect={handleMarketSelect}
+            />
           </div>
         </div>
 
@@ -115,7 +177,7 @@ const Index = () => {
         <div className="mt-8 p-4 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           <p className="font-medium mb-1">Disclaimer</p>
           <p>
-            The Stock Whisperer Bot provides predictions for demonstration purposes only. 
+            The Stock Whisperer Bot provides predictions and sentiment analysis for demonstration purposes only. 
             All predictions are based on historical data and simulated analysis. 
             This application does not provide actual financial advice. 
             Always consult a qualified financial advisor before making investment decisions.
@@ -126,7 +188,7 @@ const Index = () => {
       <footer className="bg-gray-100 border-t py-6 mt-8">
         <div className="container max-w-7xl mx-auto px-4">
           <p className="text-center text-gray-600 text-sm">
-            © {new Date().getFullYear()} Stock Whisperer Bot - A stock prediction demo app
+            © {new Date().getFullYear()} Stock Whisperer Bot - Enhanced with real-time data, historical analysis, and sentiment scoring
           </p>
         </div>
       </footer>

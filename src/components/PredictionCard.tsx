@@ -1,7 +1,7 @@
 
 import React from 'react';
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
-import { Smile, Frown, Meh, TrendingUp, TrendingDown, Minus } from 'lucide-react';
+import { Smile, Frown, Meh, TrendingUp, TrendingDown, Minus, BarChart2, Clock } from 'lucide-react';
 import { type StockData } from '@/utils/stockData';
 
 interface PredictionCardProps {
@@ -23,7 +23,7 @@ const PredictionCard = ({ stock }: PredictionCardProps) => {
     );
   }
 
-  const { prediction } = stock;
+  const { prediction, sentiment } = stock;
   const currentPrice = stock.price;
   const targetPrice = prediction.targetPrice;
   const percentChange = ((targetPrice - currentPrice) / currentPrice) * 100;
@@ -57,6 +57,25 @@ const PredictionCard = ({ stock }: PredictionCardProps) => {
     confidenceText = 'Low Confidence';
   }
 
+  // Get market currency symbol
+  const currencySymbol = stock.market === 'India' ? '₹' : '$';
+  
+  // Sentiment color based on score
+  const sentimentScore = sentiment.score;
+  let sentimentColor;
+  let sentimentText;
+  
+  if (sentimentScore >= 0.6) {
+    sentimentColor = 'text-stock-green';
+    sentimentText = 'Bullish';
+  } else if (sentimentScore >= 0.4) {
+    sentimentColor = 'text-amber-500';
+    sentimentText = 'Neutral';
+  } else {
+    sentimentColor = 'text-stock-red';
+    sentimentText = 'Bearish';
+  }
+
   return (
     <Card className="h-full">
       <CardHeader>
@@ -72,12 +91,12 @@ const PredictionCard = ({ stock }: PredictionCardProps) => {
         <div className="grid gap-4">
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Current Price:</span>
-            <span className="font-medium">${currentPrice.toFixed(2)}</span>
+            <span className="font-medium">{currencySymbol}{currentPrice.toFixed(2)}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-sm text-muted-foreground">Target Price:</span>
             <span className={`font-bold ${directionColor}`}>
-              ${targetPrice.toFixed(2)}
+              {currencySymbol}{targetPrice.toFixed(2)}
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -86,6 +105,12 @@ const PredictionCard = ({ stock }: PredictionCardProps) => {
               {directionIcon}
               {percentChange >= 0 ? '+' : ''}
               {percentChange.toFixed(2)}%
+            </span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-muted-foreground">Market Sentiment:</span>
+            <span className={`font-medium ${sentimentColor}`}>
+              {sentimentText} ({sentimentScore.toFixed(2)})
             </span>
           </div>
           <div className="flex items-center justify-between">
@@ -102,8 +127,12 @@ const PredictionCard = ({ stock }: PredictionCardProps) => {
           </div>
         </div>
       </CardContent>
-      <CardFooter className="text-xs text-muted-foreground">
-        Based on technical analysis and market trends
+      <CardFooter className="text-xs text-muted-foreground flex justify-between items-center">
+        <span>Based on technical & sentiment analysis</span>
+        <span className="flex items-center gap-1">
+          <Clock size={12} />
+          Real-time
+        </span>
       </CardFooter>
     </Card>
   );
