@@ -4,6 +4,11 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Progress } from '@/components/ui/progress';
 import { Smile, Meh, Frown, TrendingUp, TrendingDown, Minus } from 'lucide-react';
 import { type StockData } from '@/utils/stockData';
+import { 
+  Tooltip,
+  TooltipContent, 
+  TooltipTrigger
+} from '@/components/ui/tooltip';
 
 interface SentimentAnalysisProps {
   stock?: StockData;
@@ -96,7 +101,14 @@ const SentimentAnalysis = ({ stock }: SentimentAnalysisProps) => {
               {sentiment.newsItems.map((item, idx) => (
                 <div key={idx} className="bg-gray-50 p-2 rounded-md">
                   <div className="flex items-start justify-between">
-                    <p className="text-xs font-medium line-clamp-2">{item.title}</p>
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <p className="text-xs font-medium line-clamp-2 cursor-help">{item.title}</p>
+                      </TooltipTrigger>
+                      <TooltipContent>
+                        <p className="max-w-xs">{item.title}</p>
+                      </TooltipContent>
+                    </Tooltip>
                     <span className={`text-xs px-2 py-0.5 rounded-full ml-2 ${
                       item.sentiment === 'positive' ? 'bg-green-100 text-green-700' : 
                       item.sentiment === 'negative' ? 'bg-red-100 text-red-700' : 
