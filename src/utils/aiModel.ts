@@ -1,12 +1,13 @@
 
 import { pipeline, env } from '@huggingface/transformers';
+import { getStockBySymbol } from './stockData';
 
 // Configure the library to use WebGPU acceleration if available
 env.useBrowserCache = true;
 env.allowLocalModels = false;
 
-// Models to be used
-const SENTIMENT_MODEL = 'finiteautomata/bertweet-base-sentiment-analysis';
+// Models to be used - switching to more reliable models that work better in the browser
+const SENTIMENT_MODEL = 'Xenova/distilbert-base-uncased-finetuned-sst-2-english';
 const TEXT_GENERATION_MODEL = 'Xenova/distilgpt2'; // Using a small model for browser compatibility
 
 // Initialize pipelines - these will be loaded on-demand
@@ -65,7 +66,18 @@ export const analyzeSentiment = async (text: string) => {
     }
     
     const result = await sentimentPipeline(text);
-    return result[0];
+    // Normalize the sentiment score to a -1 to 1 range
+    let normalizedScore = 0.5;
+    if (result[0].label === 'POSITIVE') {
+      normalizedScore = 0.5 + (result[0].score / 2);
+    } else if (result[0].label === 'NEGATIVE') {
+      normalizedScore = 0.5 - (result[0].score / 2);
+    }
+    
+    return { 
+      label: result[0].label.toLowerCase(), 
+      score: normalizedScore 
+    };
   } catch (error) {
     console.error('Error in sentiment analysis:', error);
     return { label: 'neutral', score: 0.5 };
@@ -109,12 +121,27 @@ export const generateStockResponse = async (prompt: string) => {
 };
 
 /**
- * Generate future market trend prediction based on sentiment and historical patterns
+ * Generate future market trend prediction based on real-time data, sentiment and historical patterns
  */
 export const predictFutureTrends = async (stockSymbol: string, timeframe: string = 'short-term') => {
   try {
-    // Create a prompt specifically for trend prediction
-    const predictionPrompt = `Predict ${timeframe} future trends for ${stockSymbol} based on market sentiment, technical analysis, and recent news.`;
+    // Get real-time stock data for the symbol
+    const stockData = await getStockBySymbol(stockSymbol);
+    
+    if (!stockData) {
+      throw new Error(`Could not fetch data for ${stockSymbol}`);
+    }
+    
+    // Create a prompt specifically for trend prediction using real data
+    const predictionPrompt = `
+      Based on current data for ${stockSymbol} (${stockData.name}):
+      - Current price: ${stockData.price}
+      - Recent change: ${stockData.change > 0 ? '+' : ''}${stockData.change} (${stockData.changePercent}%)
+      - Market sentiment score: ${stockData.sentiment.score.toFixed(2)}
+      - ${stockData.sentiment.analysis}
+      
+      Predict ${timeframe} future trends for ${stockSymbol} considering the above metrics, technical analysis patterns, and recent market conditions.
+    `;
     
     const prediction = await generateStockResponse(predictionPrompt);
     
@@ -123,13 +150,16 @@ export const predictFutureTrends = async (stockSymbol: string, timeframe: string
       timeframe: timeframe,
       prediction: prediction,
       generatedAt: new Date().toISOString(),
+      currentPrice: stockData.price,
+      recentChange: stockData.change,
+      sentimentScore: stockData.sentiment.score
     };
   } catch (error) {
     console.error('Error in trend prediction:', error);
     return {
       symbol: stockSymbol,
       timeframe: timeframe,
-      prediction: "Unable to generate trend prediction at this time.",
+      prediction: "Unable to generate trend prediction due to data access issues.",
       generatedAt: new Date().toISOString(),
     };
   }
@@ -137,46 +167,74 @@ export const predictFutureTrends = async (stockSymbol: string, timeframe: string
 
 /**
  * Process chat message and get AI-enhanced response with trend predictions
+ * using real-time market data
  */
 export const processMessage = async (message: string) => {
   try {
     // Analyze sentiment of the user's message
     const sentiment = await analyzeSentiment(message);
     
-    // Generate response based on user query
-    const responseText = await generateStockResponse(message);
-    
     // Extract potential stock symbols from message
     const stockSymbolRegex = /\b[A-Z]{1,5}(?:\.NS)?\b/g;
     const potentialSymbols = message.match(stockSymbolRegex) || [];
+    
+    // Check if any symbols exist in our data
+    let validSymbols = [];
+    for (const symbol of potentialSymbols) {
+      const stockExists = await getStockBySymbol(symbol);
+      if (stockExists) {
+        validSymbols.push(symbol);
+      }
+    }
+    
+    // Enhance prompt with real-time data if available
+    let enhancedPrompt = message;
+    if (validSymbols.length > 0) {
+      const stockData = await getStockBySymbol(validSymbols[0]);
+      if (stockData) {
+        enhancedPrompt = `
+          Regarding ${stockData.name} (${stockData.symbol}):
+          - Current price: ${stockData.price}
+          - Recent change: ${stockData.change > 0 ? '+' : ''}${stockData.change} (${stockData.changePercent}%)
+          - Market sentiment: ${stockData.sentiment.score > 0.6 ? 'Positive' : stockData.sentiment.score > 0.4 ? 'Neutral' : 'Negative'}
+          
+          User query: ${message}
+        `;
+      }
+    }
+    
+    // Generate response based on user query with enhanced data
+    const responseText = await generateStockResponse(enhancedPrompt);
     
     // Check if the message is asking about future trends or predictions
     const isTrendQuery = /\b(future|trend|predict|forecast|outlook|will.*go|price.*target)\b/i.test(message);
     
     let trendPrediction = null;
-    if (isTrendQuery && potentialSymbols.length > 0) {
+    if (isTrendQuery && validSymbols.length > 0) {
       // Only generate trend prediction if explicitly asked and a symbol is detected
       const timeframeMatch = message.match(/\b(short|long|medium)\s*(?:term)?\b/i);
       const timeframe = timeframeMatch ? `${timeframeMatch[1].toLowerCase()}-term` : 'short-term';
       
-      trendPrediction = await predictFutureTrends(potentialSymbols[0], timeframe);
+      trendPrediction = await predictFutureTrends(validSymbols[0], timeframe);
     }
     
     return {
       text: responseText,
       sentiment: sentiment,
-      detectedSymbols: potentialSymbols,
+      detectedSymbols: validSymbols,
       trendPrediction: trendPrediction,
-      usedAI: true
+      usedAI: true,
+      usedRealTimeData: validSymbols.length > 0
     };
   } catch (error) {
     console.error('Error processing message with AI:', error);
     return {
-      text: "I apologize, but I'm having trouble analyzing your request right now. Could you please try again?",
+      text: "I apologize, but I'm having trouble analyzing your request with the latest market data. Could you please try again?",
       sentiment: { label: 'neutral', score: 0.5 },
       detectedSymbols: [],
       trendPrediction: null,
-      usedAI: false
+      usedAI: false,
+      usedRealTimeData: false
     };
   }
 };

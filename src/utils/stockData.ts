@@ -1,4 +1,6 @@
-// Stock data utilities with enhanced real-time, historical data and sentiment analysis
+// Stock data utilities with real Yahoo Finance API integration
+import { toast } from "@/components/ui/use-toast";
+
 export interface StockData {
   symbol: string;
   name: string;
@@ -30,6 +32,387 @@ export interface StockData {
   }[];
 }
 
+// Cache for API responses to reduce repeated calls
+const apiCache: Record<string, { data: any, timestamp: number }> = {};
+const CACHE_EXPIRY = 60000; // 1 minute in milliseconds
+
+// Yahoo Finance API endpoint via RapidAPI
+const YAHOO_FINANCE_API_HOST = "yahoo-finance15.p.rapidapi.com";
+const YAHOO_FINANCE_API_KEY = "PLACEHOLDER_API_KEY"; // Replace with your actual API key
+
+/**
+ * Fetch real-time stock data from Yahoo Finance API
+ */
+export async function fetchRealTimeStockData(symbol: string): Promise<StockData | null> {
+  try {
+    const cachedData = apiCache[`realtime-${symbol}`];
+    if (cachedData && Date.now() - cachedData.timestamp < CACHE_EXPIRY) {
+      console.log(`Using cached data for ${symbol}`);
+      return processStockApiResponse(cachedData.data, symbol);
+    }
+
+    console.log(`Fetching real-time data for ${symbol}`);
+    const options = {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': YAHOO_FINANCE_API_KEY,
+        'X-RapidAPI-Host': YAHOO_FINANCE_API_HOST
+      }
+    };
+
+    const response = await fetch(`https://${YAHOO_FINANCE_API_HOST}/api/v1/markets/quote?symbol=${symbol}`, options);
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    apiCache[`realtime-${symbol}`] = {
+      data: result,
+      timestamp: Date.now()
+    };
+
+    return processStockApiResponse(result, symbol);
+  } catch (error) {
+    console.error(`Error fetching real-time data for ${symbol}:`, error);
+    toast({
+      title: "API Error",
+      description: `Could not fetch real-time data for ${symbol}. Using fallback data.`,
+      variant: "destructive"
+    });
+    return getFallbackStockData(symbol);
+  }
+}
+
+/**
+ * Fetch historical stock data from Yahoo Finance API
+ */
+export async function fetchHistoricalStockData(
+  symbol: string, 
+  interval: string = "1d", 
+  range: string = "3mo"
+): Promise<{ date: string; price: number; volume?: number }[]> {
+  try {
+    const cacheKey = `historical-${symbol}-${interval}-${range}`;
+    const cachedData = apiCache[cacheKey];
+    if (cachedData && Date.now() - cachedData.timestamp < CACHE_EXPIRY) {
+      console.log(`Using cached historical data for ${symbol}`);
+      return cachedData.data;
+    }
+
+    console.log(`Fetching historical data for ${symbol}`);
+    const options = {
+      method: 'GET',
+      headers: {
+        'X-RapidAPI-Key': YAHOO_FINANCE_API_KEY,
+        'X-RapidAPI-Host': YAHOO_FINANCE_API_HOST
+      }
+    };
+
+    const response = await fetch(`https://${YAHOO_FINANCE_API_HOST}/api/v1/markets/history?symbol=${symbol}&interval=${interval}&range=${range}`, options);
+    if (!response.ok) {
+      throw new Error(`API returned ${response.status}: ${response.statusText}`);
+    }
+
+    const result = await response.json();
+    const historicalData = processHistoricalApiResponse(result);
+    
+    apiCache[cacheKey] = {
+      data: historicalData,
+      timestamp: Date.now()
+    };
+
+    return historicalData;
+  } catch (error) {
+    console.error(`Error fetching historical data for ${symbol}:`, error);
+    toast({
+      title: "API Error",
+      description: `Could not fetch historical data for ${symbol}. Using fallback data.`,
+      variant: "destructive"
+    });
+    return generateMockHistoricalData(
+      symbol.includes("NS") ? 2000 : 150, 
+      symbol.includes("NS") ? 50 : 5, 
+      90, 
+      true
+    );
+  }
+}
+
+/**
+ * Process real-time stock data API response
+ */
+function processStockApiResponse(apiResponse: any, symbol: string): StockData | null {
+  try {
+    if (!apiResponse || !apiResponse.body || !apiResponse.body[0]) {
+      throw new Error("Invalid API response format");
+    }
+
+    const stockData = apiResponse.body[0];
+    const market = symbol.includes(".NS") ? 'India' : 'US';
+    const price = parseFloat(stockData.regularMarketPrice.toFixed(2));
+    const change = parseFloat(stockData.regularMarketChange.toFixed(2));
+    const changePercent = parseFloat(stockData.regularMarketChangePercent.toFixed(2));
+    
+    return {
+      symbol: symbol,
+      name: stockData.longName || stockData.shortName,
+      price: price,
+      change: change,
+      changePercent: changePercent,
+      market: market,
+      sentiment: generateSentimentData(change, changePercent),
+      prediction: generatePredictionData(symbol, price, change, changePercent),
+      historicalData: [], // Will be populated separately
+      realTimeUpdates: [{
+        lastUpdate: new Date().toISOString(),
+        price: price,
+        change: change
+      }]
+    };
+  } catch (error) {
+    console.error("Error processing API response:", error);
+    return null;
+  }
+}
+
+/**
+ * Process historical stock data API response
+ */
+function processHistoricalApiResponse(apiResponse: any): { date: string; price: number; volume?: number }[] {
+  try {
+    if (!apiResponse || !apiResponse.body || !apiResponse.body.items) {
+      throw new Error("Invalid historical API response format");
+    }
+
+    const items = apiResponse.body.items;
+    return items.map((item: any) => ({
+      date: new Date(item.date * 1000).toISOString().split('T')[0],
+      price: parseFloat(item.close.toFixed(2)),
+      volume: item.volume
+    })).reverse(); // Ensure chronological order
+  } catch (error) {
+    console.error("Error processing historical API response:", error);
+    return [];
+  }
+}
+
+/**
+ * Generate sentiment data based on price movement
+ */
+function generateSentimentData(change: number, changePercent: number) {
+  // Calculate sentiment score based on price change
+  const sentimentScore = Math.min(Math.max((changePercent / 10) + 0.5, 0), 1);
+  
+  let sentiment: 'positive' | 'neutral' | 'negative';
+  let analysis: string;
+  
+  if (sentimentScore > 0.6) {
+    sentiment = 'positive';
+    analysis = 'Strong positive sentiment with increasing buying interest';
+  } else if (sentimentScore > 0.4) {
+    sentiment = 'neutral';
+    analysis = 'Neutral market sentiment with balanced trading activity';
+  } else {
+    sentiment = 'negative';
+    analysis = 'Negative sentiment with increased selling pressure';
+  }
+  
+  // Generate mock news items
+  const today = new Date();
+  const newsItems = [
+    {
+      title: change > 0 
+        ? 'Analysts upgrade outlook on recent performance' 
+        : 'Market reacts to recent underperformance',
+      sentiment: sentiment,
+      source: 'Market Watch',
+      date: new Date(today.setDate(today.getDate() - 1)).toISOString().split('T')[0]
+    },
+    {
+      title: 'Quarterly results impact market perception',
+      sentiment: 'neutral',
+      source: 'Bloomberg',
+      date: new Date(today.setDate(today.getDate() - 3)).toISOString().split('T')[0]
+    },
+    {
+      title: change > 0 
+        ? 'Institutional investors increase holdings' 
+        : 'Institutional investors rebalance portfolios',
+      sentiment: change > 0 ? 'positive' : 'neutral',
+      source: 'Financial Times',
+      date: new Date(today.setDate(today.getDate() - 5)).toISOString().split('T')[0]
+    }
+  ];
+  
+  return {
+    score: sentimentScore,
+    analysis: analysis,
+    newsItems: newsItems
+  };
+}
+
+/**
+ * Generate prediction data based on current price and movement
+ */
+function generatePredictionData(symbol: string, price: number, change: number, changePercent: number) {
+  // Determine direction based on momentum and random factor
+  const momentum = changePercent / 100;
+  const randomFactor = Math.random() * 0.4 - 0.2; // Random value between -0.2 and 0.2
+  const combinedSignal = momentum + randomFactor;
+  
+  let direction: 'up' | 'down' | 'neutral';
+  if (combinedSignal > 0.1) {
+    direction = 'up';
+  } else if (combinedSignal < -0.1) {
+    direction = 'down';
+  } else {
+    direction = 'neutral';
+  }
+  
+  // Calculate confidence based on signal strength and market volatility
+  const signalStrength = Math.abs(combinedSignal);
+  const confidence = 0.5 + Math.min(signalStrength * 2, 0.4);
+  
+  // Calculate target price
+  let targetMultiplier;
+  if (direction === 'up') {
+    targetMultiplier = 1 + (Math.random() * 0.1 + 0.05); // 5-15% increase
+  } else if (direction === 'down') {
+    targetMultiplier = 1 - (Math.random() * 0.1 + 0.05); // 5-15% decrease
+  } else {
+    targetMultiplier = 1 + (Math.random() * 0.06 - 0.03); // -3% to +3%
+  }
+  
+  const targetPrice = parseFloat((price * targetMultiplier).toFixed(2));
+  
+  return {
+    direction: direction,
+    targetPrice: targetPrice,
+    confidence: parseFloat(confidence.toFixed(2)),
+    timeFrame: '3 months'
+  };
+}
+
+/**
+ * Get a list of popular US stocks
+ */
+export function getPopularUSStocks(): string[] {
+  return ['AAPL', 'MSFT', 'GOOGL', 'AMZN', 'META', 'TSLA'];
+}
+
+/**
+ * Get a list of popular Indian stocks
+ */
+export function getPopularIndianStocks(): string[] {
+  return ['RELIANCE.NS', 'TCS.NS', 'HDFCBANK.NS', 'INFY.NS', 'BAJAJ-AUTO.NS'];
+}
+
+/**
+ * Enhanced search function to fetch real-time data for the matched stocks
+ */
+export async function searchStocks(query: string): Promise<StockData[]> {
+  if (!query) return [];
+  
+  const normalizedQuery = query.toLowerCase();
+  
+  // First, search among predefined popular stocks
+  const usStocks = getPopularUSStocks();
+  const indianStocks = getPopularIndianStocks();
+  const allStockSymbols = [...usStocks, ...indianStocks];
+  
+  const matchedSymbols = allStockSymbols.filter(symbol => 
+    symbol.toLowerCase().includes(normalizedQuery)
+  );
+  
+  if (matchedSymbols.length === 0) {
+    // If no matches, check fallback data
+    return popularStocks.filter(
+      stock => 
+        stock.symbol.toLowerCase().includes(normalizedQuery) || 
+        stock.name.toLowerCase().includes(normalizedQuery)
+    );
+  }
+  
+  // Fetch real-time data for matched symbols
+  const stockDataPromises = matchedSymbols.map(symbol => fetchRealTimeStockData(symbol));
+  const results = await Promise.all(stockDataPromises);
+  
+  // Filter out null results and add historical data
+  const validResults = results.filter(result => result !== null) as StockData[];
+  
+  // For each valid result, fetch and add historical data
+  for (const stock of validResults) {
+    try {
+      stock.historicalData = await fetchHistoricalStockData(stock.symbol);
+    } catch (error) {
+      console.error(`Error fetching historical data for ${stock.symbol}:`, error);
+      stock.historicalData = generateMockHistoricalData(
+        stock.market === 'India' ? 2000 : 150, 
+        stock.market === 'India' ? 50 : 5, 
+        90, 
+        true
+      );
+    }
+  }
+  
+  return validResults;
+}
+
+/**
+ * Get stock data by symbol (with API integration)
+ */
+export async function getStockBySymbol(symbol: string): Promise<StockData | undefined> {
+  try {
+    const stock = await fetchRealTimeStockData(symbol);
+    
+    if (stock) {
+      // Fetch and add historical data
+      stock.historicalData = await fetchHistoricalStockData(symbol);
+      return stock;
+    }
+    
+    return undefined;
+  } catch (error) {
+    console.error(`Error fetching stock data for ${symbol}:`, error);
+    return popularStocks.find(stock => stock.symbol === symbol);
+  }
+}
+
+/**
+ * Get stocks by market (with API integration)
+ */
+export async function getStocksByMarket(market: 'US' | 'India'): Promise<StockData[]> {
+  try {
+    const symbols = market === 'US' ? getPopularUSStocks() : getPopularIndianStocks();
+    const stockDataPromises = symbols.map(symbol => fetchRealTimeStockData(symbol));
+    const results = await Promise.all(stockDataPromises);
+    
+    // Filter out null results and add historical data
+    const validResults = results.filter(result => result !== null) as StockData[];
+    
+    // For each valid result, fetch and add historical data
+    for (const stock of validResults) {
+      try {
+        stock.historicalData = await fetchHistoricalStockData(stock.symbol);
+      } catch (error) {
+        console.error(`Error fetching historical data for ${stock.symbol}:`, error);
+        stock.historicalData = generateMockHistoricalData(
+          market === 'India' ? 2000 : 150, 
+          market === 'India' ? 50 : 5, 
+          90, 
+          true
+        );
+      }
+    }
+    
+    return validResults;
+  } catch (error) {
+    console.error(`Error fetching ${market} stocks:`, error);
+    return popularStocks.filter(stock => stock.market === market);
+  }
+}
+
+// Fallback data for when API calls fail
 // Add popular US stocks
 const usStocks: StockData[] = [
   {
