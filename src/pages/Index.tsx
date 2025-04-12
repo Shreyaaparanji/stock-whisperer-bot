@@ -6,8 +6,10 @@ import ChatInterface from '@/components/ChatInterface';
 import PredictionCard from '@/components/PredictionCard';
 import SentimentAnalysis from '@/components/SentimentAnalysis';
 import { getStockBySymbol, getStocksByMarket, type StockData } from '@/utils/stockData';
-import { ChartBar, Sparkles, BarChart2, Globe } from 'lucide-react';
+import { ChartBar, Sparkles, BarChart2, Globe, BrainCircuit } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Link } from 'react-router-dom';
+import { Button } from '@/components/ui/button';
 
 const Index = () => {
   const [selectedStock, setSelectedStock] = useState<StockData | undefined>();
@@ -54,6 +56,12 @@ const Index = () => {
                 <BarChart2 className="h-4 w-4" />
                 <span className="text-sm">AI-Powered Stock Predictions + Sentiment Analysis</span>
               </div>
+              <Link to="/ai-status">
+                <Button variant="outline" size="sm" className="bg-blue-800 text-white border-blue-700 hover:bg-blue-700">
+                  <BrainCircuit className="h-4 w-4 mr-1" />
+                  AI Status
+                </Button>
+              </Link>
               <Tabs defaultValue={selectedMarket} onValueChange={(v) => handleMarketSelect(v as 'US' | 'India')}>
                 <TabsList className="h-8 bg-blue-800">
                   <TabsTrigger 
@@ -82,12 +90,20 @@ const Index = () => {
       <main className="container max-w-7xl mx-auto px-4 py-8">
         {/* Market Selection for Mobile */}
         <div className="md:hidden mb-4">
-          <Tabs defaultValue={selectedMarket} onValueChange={(v) => handleMarketSelect(v as 'US' | 'India')}>
-            <TabsList className="w-full">
-              <TabsTrigger value="US" className="flex-1">US Market</TabsTrigger>
-              <TabsTrigger value="India" className="flex-1">Indian Market</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex justify-between items-center gap-2 mb-3">
+            <Tabs defaultValue={selectedMarket} onValueChange={(v) => handleMarketSelect(v as 'US' | 'India')}>
+              <TabsList className="w-full">
+                <TabsTrigger value="US" className="flex-1">US Market</TabsTrigger>
+                <TabsTrigger value="India" className="flex-1">Indian Market</TabsTrigger>
+              </TabsList>
+            </Tabs>
+            <Link to="/ai-status" className="shrink-0">
+              <Button variant="outline" size="sm" className="bg-blue-600 text-white border-blue-500 hover:bg-blue-700">
+                <BrainCircuit className="h-3 w-3 mr-1" />
+                AI
+              </Button>
+            </Link>
+          </div>
         </div>
 
         {/* Search Bar */}
@@ -188,7 +204,7 @@ const Index = () => {
       <footer className="bg-gray-100 border-t py-6 mt-8">
         <div className="container max-w-7xl mx-auto px-4">
           <p className="text-center text-gray-600 text-sm">
-            © {new Date().getFullYear()} Stock Whisperer Bot - Enhanced with real-time data, historical analysis, and sentiment scoring
+            © {new Date().getFullYear()} Stock Whisperer Bot - Enhanced with real-time data, historical analysis, sentiment scoring, and AI-powered predictions
           </p>
         </div>
       </footer>
