@@ -73,12 +73,12 @@ export const analyzeSentiment = async (text: string) => {
 };
 
 /**
- * Generate stock market related text response
+ * Generate stock market related text response with future trend analysis
  */
 export const generateStockResponse = async (prompt: string) => {
   try {
-    // Prepare a stock-focused prompt
-    const enhancedPrompt = `As a stock market expert, ${prompt}`;
+    // Prepare a stock-focused prompt with trend analysis emphasis
+    const enhancedPrompt = `As a stock market expert focusing on future trends and predictions, ${prompt}`;
     
     if (!generationPipeline) {
       if (modelLoadStatus.generation === 'not_loaded') {
@@ -86,29 +86,57 @@ export const generateStockResponse = async (prompt: string) => {
         generationPipeline = await pipeline('text-generation', TEXT_GENERATION_MODEL);
         modelLoadStatus.generation = 'loaded';
       } else if (modelLoadStatus.generation === 'loading') {
-        return "I'm currently loading my knowledge base. Please try again in a moment.";
+        return "I'm currently loading my predictive models. Please try again in a moment.";
       }
     }
     
     const result = await generationPipeline(enhancedPrompt, {
-      max_length: 100,
+      max_length: 150, // Increased for more detailed predictions
       temperature: 0.7,
       top_p: 0.9,
+      repetition_penalty: 1.2, // Reduce repetition in predictions
     });
     
     // Clean up the generated text
     let generatedText = result[0].generated_text;
     generatedText = generatedText.replace(enhancedPrompt, '').trim();
     
-    return generatedText || "I don't have enough information to provide a good answer to that question.";
+    return generatedText || "I don't have enough information to provide a prediction for that query.";
   } catch (error) {
     console.error('Error in text generation:', error);
-    return "I'm having trouble processing your request right now. Let me get back to you.";
+    return "I'm having trouble with my predictive models right now. Let me get back to you.";
   }
 };
 
 /**
- * Process chat message and get AI-enhanced response
+ * Generate future market trend prediction based on sentiment and historical patterns
+ */
+export const predictFutureTrends = async (stockSymbol: string, timeframe: string = 'short-term') => {
+  try {
+    // Create a prompt specifically for trend prediction
+    const predictionPrompt = `Predict ${timeframe} future trends for ${stockSymbol} based on market sentiment, technical analysis, and recent news.`;
+    
+    const prediction = await generateStockResponse(predictionPrompt);
+    
+    return {
+      symbol: stockSymbol,
+      timeframe: timeframe,
+      prediction: prediction,
+      generatedAt: new Date().toISOString(),
+    };
+  } catch (error) {
+    console.error('Error in trend prediction:', error);
+    return {
+      symbol: stockSymbol,
+      timeframe: timeframe,
+      prediction: "Unable to generate trend prediction at this time.",
+      generatedAt: new Date().toISOString(),
+    };
+  }
+};
+
+/**
+ * Process chat message and get AI-enhanced response with trend predictions
  */
 export const processMessage = async (message: string) => {
   try {
@@ -122,10 +150,23 @@ export const processMessage = async (message: string) => {
     const stockSymbolRegex = /\b[A-Z]{1,5}(?:\.NS)?\b/g;
     const potentialSymbols = message.match(stockSymbolRegex) || [];
     
+    // Check if the message is asking about future trends or predictions
+    const isTrendQuery = /\b(future|trend|predict|forecast|outlook|will.*go|price.*target)\b/i.test(message);
+    
+    let trendPrediction = null;
+    if (isTrendQuery && potentialSymbols.length > 0) {
+      // Only generate trend prediction if explicitly asked and a symbol is detected
+      const timeframeMatch = message.match(/\b(short|long|medium)\s*(?:term)?\b/i);
+      const timeframe = timeframeMatch ? `${timeframeMatch[1].toLowerCase()}-term` : 'short-term';
+      
+      trendPrediction = await predictFutureTrends(potentialSymbols[0], timeframe);
+    }
+    
     return {
       text: responseText,
       sentiment: sentiment,
       detectedSymbols: potentialSymbols,
+      trendPrediction: trendPrediction,
       usedAI: true
     };
   } catch (error) {
@@ -134,6 +175,7 @@ export const processMessage = async (message: string) => {
       text: "I apologize, but I'm having trouble analyzing your request right now. Could you please try again?",
       sentiment: { label: 'neutral', score: 0.5 },
       detectedSymbols: [],
+      trendPrediction: null,
       usedAI: false
     };
   }
@@ -143,4 +185,3 @@ export const processMessage = async (message: string) => {
 initializeAIModels().catch(console.error);
 
 export const getModelLoadingStatus = () => modelLoadStatus;
-

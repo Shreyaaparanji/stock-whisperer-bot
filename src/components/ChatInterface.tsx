@@ -1,6 +1,5 @@
-
 import React, { useState, useRef, useEffect } from 'react';
-import { SendHorizontal, Bot, Sparkles, BarChart2, TrendingUp, Globe, Loader2 } from 'lucide-react';
+import { SendHorizontal, Bot, Sparkles, BarChart2, TrendingUp, Globe, Loader2, Calendar } from 'lucide-react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
@@ -16,9 +15,15 @@ interface Message {
   text: string;
   sender: 'user' | 'bot';
   timestamp: Date;
-  type?: 'text' | 'suggestion';
+  type?: 'text' | 'suggestion' | 'prediction';
   sentimentScore?: number;
   detectedSymbols?: string[];
+  trendPrediction?: {
+    symbol: string;
+    timeframe: string;
+    prediction: string;
+    generatedAt: string;
+  } | null;
 }
 
 interface ChatInterfaceProps {
@@ -52,7 +57,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const { toast } = useToast();
 
-  // Suggestions that will appear as clickable badges
   const suggestions = [
     { text: "US Market Analysis", action: () => handleSuggestionClick("Tell me about the US market") },
     { text: "Indian Market Analysis", action: () => handleSuggestionClick("What's happening in the Indian market?") },
@@ -61,18 +65,15 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
     { text: "Explain Sentiment Scores", action: () => handleSuggestionClick("How do you calculate sentiment scores?") }
   ];
 
-  // Initialize AI models and check status
   useEffect(() => {
     const checkModelStatus = () => {
       const status = getModelLoadingStatus();
       setModelStatus(status);
       
-      // If models are still loading, check again in a bit
       if (status.sentiment === 'loading' || status.generation === 'loading') {
         setTimeout(checkModelStatus, 2000);
       }
       
-      // Notify when models are ready
       if (status.sentiment === 'loaded' && status.generation === 'loaded' && 
           (modelStatus.sentiment !== 'loaded' || modelStatus.generation !== 'loaded')) {
         toast({
@@ -83,7 +84,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
       }
     };
     
-    // Start AI model initialization
     initializeAIModels().then(() => {
       checkModelStatus();
     });
@@ -122,13 +122,11 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
     setInput('');
     setIsTyping(true);
 
-    // Check for market mentions
     const marketMentions = [
       { market: 'US', patterns: [/\bus market\b/i, /\bamerican market\b/i, /\bus stocks\b/i] },
       { market: 'India', patterns: [/\bindian market\b/i, /\bindia market\b/i, /\bnifty\b/i, /\bsensex\b/i] }
     ];
 
-    // Check for market mentions
     for (const market of marketMentions) {
       for (const pattern of market.patterns) {
         if (pattern.test(messageText)) {
@@ -142,26 +140,22 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
       let botResponse;
       let detectedSymbols: string[] = [];
       let sentimentScore: number | undefined;
+      let trendPrediction = null;
       
-      // Use AI model or fallback depending on loading status and toggle
       if (usingAI && modelStatus.sentiment === 'loaded' && modelStatus.generation === 'loaded') {
-        // Process with AI
         const aiResponse = await processMessage(messageText);
         botResponse = aiResponse.text;
         sentimentScore = aiResponse.sentiment?.score;
         detectedSymbols = aiResponse.detectedSymbols || [];
+        trendPrediction = aiResponse.trendPrediction;
         
-        // Notify any detected stock symbols
         detectedSymbols.forEach(symbol => {
           onStockMentioned?.(symbol);
         });
       } else {
-        // Fallback to predefined responses
         botResponse = getBotResponse(messageText);
         
-        // Check for stock mentions using the fallback method
         const stockMentions = [
-          // US market stocks
           { symbol: 'AAPL', patterns: [/\baapl\b/i, /\bapple\b/i], market: 'US' },
           { symbol: 'MSFT', patterns: [/\bmsft\b/i, /\bmicrosoft\b/i], market: 'US' },
           { symbol: 'GOOGL', patterns: [/\bgoogl\b/i, /\bgoogle\b/i, /\balphabet\b/i], market: 'US' },
@@ -169,7 +163,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
           { symbol: 'META', patterns: [/\bmeta\b/i, /\bfacebook\b/i, /\bfb\b/i], market: 'US' },
           { symbol: 'TSLA', patterns: [/\btsla\b/i, /\btesla\b/i], market: 'US' },
           
-          // Indian market stocks
           { symbol: 'RELIANCE.NS', patterns: [/\breliance\b/i, /\bril\b/i], market: 'India' },
           { symbol: 'TCS.NS', patterns: [/\btcs\b/i, /\btata consultancy\b/i], market: 'India' },
           { symbol: 'HDFCBANK.NS', patterns: [/\bhdfc bank\b/i, /\bhdfcbank\b/i], market: 'India' },
@@ -177,7 +170,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
           { symbol: 'BAJAJ-AUTO.NS', patterns: [/\bbajaj auto\b/i, /\bbajaj-auto\b/i], market: 'India' }
         ];
 
-        // Check for stock mentions
         for (const stock of stockMentions) {
           for (const pattern of stock.patterns) {
             if (pattern.test(messageText)) {
@@ -190,49 +182,63 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
         }
       }
       
-      // Create bot message with AI-enhanced properties
       const botReply: Message = {
         id: messages.length + 2,
         text: botResponse,
         sender: 'bot',
         timestamp: new Date(),
         sentimentScore,
-        detectedSymbols
+        detectedSymbols,
+        trendPrediction
       };
       
       setTimeout(() => {
         setMessages(prev => [...prev, botReply]);
         
-        // Maybe add a follow-up suggestion
-        const shouldAddSuggestion = Math.random() > 0.5; // 50% chance
-        
-        if (shouldAddSuggestion) {
-          const suggestionOptions = [
-            "Would you like to see sentiment analysis for this stock?",
-            "Can I show you historical performance comparisons?",
-            "Do you want to know about related stocks in this sector?",
-            "Would you like real-time updates on this stock?"
-          ];
-          
-          const suggestion: Message = {
+        if (trendPrediction) {
+          const predictionMessage: Message = {
             id: messages.length + 3,
-            text: suggestionOptions[Math.floor(Math.random() * suggestionOptions.length)],
+            text: trendPrediction.prediction,
             sender: 'bot',
             timestamp: new Date(),
-            type: 'suggestion'
+            type: 'prediction',
+            detectedSymbols: [trendPrediction.symbol],
+            trendPrediction
           };
           
           setTimeout(() => {
-            setMessages(prev => [...prev, suggestion]);
+            setMessages(prev => [...prev, predictionMessage]);
           }, 500);
+        } else {
+          const shouldAddSuggestion = Math.random() > 0.5;
+          
+          if (shouldAddSuggestion) {
+            const suggestionOptions = [
+              "Would you like to see sentiment analysis for this stock?",
+              "Can I show you historical performance comparisons?",
+              "Do you want to know about related stocks in this sector?",
+              "Would you like real-time updates on this stock?"
+            ];
+            
+            const suggestion: Message = {
+              id: messages.length + 3,
+              text: suggestionOptions[Math.floor(Math.random() * suggestionOptions.length)],
+              sender: 'bot',
+              timestamp: new Date(),
+              type: 'suggestion'
+            };
+            
+            setTimeout(() => {
+              setMessages(prev => [...prev, suggestion]);
+            }, 500);
+          }
         }
         
         setIsTyping(false);
-      }, 1000); // Simulate typing delay
+      }, 1000);
     } catch (error) {
       console.error("Error processing message:", error);
       
-      // Add error message
       setTimeout(() => {
         setMessages(prev => [...prev, {
           id: messages.length + 2,
@@ -251,7 +257,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
     }
   };
 
-  // Determine if AI mode is available
   const aiModeAvailable = modelStatus.sentiment === 'loaded' && modelStatus.generation === 'loaded';
 
   return (
@@ -300,6 +305,20 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
                   </div>
                   <p className="text-sm">{message.text}</p>
                 </div>
+              ) : message.type === 'prediction' ? (
+                <div className="max-w-[90%] p-2 rounded-lg bg-purple-50 text-purple-800 border border-purple-200">
+                  <div className="flex items-center gap-1 mb-1">
+                    <TrendingUp size={12} className="text-purple-500" />
+                    <span className="text-xs font-medium text-purple-500">
+                      {message.trendPrediction?.timeframe || 'Short-term'} Prediction for {message.trendPrediction?.symbol}
+                    </span>
+                    <Calendar size={10} className="ml-1 text-purple-400" />
+                    <span className="text-xs text-purple-400">
+                      {new Date(message.trendPrediction?.generatedAt || '').toLocaleDateString()}
+                    </span>
+                  </div>
+                  <p className="text-sm whitespace-pre-line">{message.text}</p>
+                </div>
               ) : (
                 <div
                   className={`max-w-[80%] rounded-lg p-3 ${
@@ -310,7 +329,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
                 >
                   <p className="whitespace-pre-line">{message.text}</p>
                   
-                  {/* Display detected symbols if any */}
                   {message.detectedSymbols && message.detectedSymbols.length > 0 && (
                     <div className="mt-2 flex flex-wrap gap-1">
                       {message.detectedSymbols.map((symbol, idx) => (
@@ -321,7 +339,6 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
                     </div>
                   )}
                   
-                  {/* Display sentiment score if available */}
                   {message.sentimentScore !== undefined && (
                     <div className="mt-1 text-xs flex items-center gap-1">
                       <span className={`font-medium ${
@@ -372,7 +389,7 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
       <CardFooter className="border-t p-3">
         <div className="flex w-full gap-2">
           <Input
-            placeholder="Ask about stocks, sentiment analysis, or market predictions..."
+            placeholder="Ask about stocks, future trends, sentiment analysis, or market predictions..."
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
@@ -402,4 +419,3 @@ const ChatInterface = ({ onStockMentioned, onMarketSelect }: ChatInterfaceProps)
 };
 
 export default ChatInterface;
-
